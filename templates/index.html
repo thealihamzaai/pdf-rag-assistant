@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF RAG Assistant</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, Segoe UI, Arial, sans-serif; background: #f4f6f8; color: #17202a; }
+    header { background: #132238; color: white; padding: 18px 24px; font-weight: 700; font-size: 22px; }
+    .layout { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 62px); }
+    aside { background: white; border-right: 1px solid #e1e6eb; padding: 22px; }
+    main { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+    h2, h3 { margin-top: 0; }
+    .hint { color: #607080; font-size: 13px; line-height: 1.5; }
+    input[type=file] { width: 100%; margin: 8px 0 12px; }
+    button { border: 0; border-radius: 8px; padding: 10px 14px; background: #1d4ed8; color: white; cursor: pointer; }
+    button:hover { background: #1e40af; }
+    .doc { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #eef1f4; font-size: 14px; }
+    .doc form { margin: 0; }
+    .delete { background: transparent; color: #b42318; padding: 4px 6px; }
+    .chat { background: white; border: 1px solid #e1e6eb; border-radius: 12px; padding: 18px; flex: 1; overflow-y: auto; min-height: 480px; }
+    .message { margin: 0 0 16px; }
+    .bubble { display: inline-block; max-width: 85%; padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; line-height: 1.5; }
+    .user { text-align: right; }
+    .user .bubble { background: #132238; color: white; }
+    .bot .bubble { background: #eef2f6; }
+    .sources { margin-top: 8px; padding: 10px 12px; background: #f8fafc; border-left: 3px solid #1d4ed8; font-size: 13px; line-height: 1.6; }
+    .input-row { display: flex; gap: 10px; }
+    #message { flex: 1; border: 1px solid #ccd4dd; border-radius: 8px; padding: 12px; font-size: 15px; }
+    @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid #e1e6eb; } }
+  </style>
+</head>
+<body>
+<header>PDF RAG Assistant</header>
+<div class="layout">
+  <aside>
+    <h2>Documents</h2>
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+      <input type="file" name="files" accept="application/pdf,.pdf" multiple required>
+      <button type="submit">Upload PDFs</button>
+    </form>
+    <p class="hint">PDF files only. Maximum request size: {{ max_upload_mb }} MB.</p>
+    <h3>Uploaded</h3>
+    {% if files %}
+      {% for file in files %}
+      <div class="doc">
+        <span>{{ file }}</span>
+        <form action="{{ url_for('delete_pdf', filename=file) }}" method="POST">
+          <button class="delete" type="submit" title="Delete">Remove</button>
+        </form>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="hint">No documents uploaded yet.</p>
+    {% endif %}
+  </aside>
+  <main>
+    <div class="chat" id="chat"></div>
+    <div class="input-row">
+      <input id="message" placeholder="Ask a question about the uploaded PDFs…" autocomplete="off">
+      <button id="send" type="button">Send</button>
+    </div>
+  </main>
+</div>
+<script>
+  const chat = document.getElementById('chat');
+  const input = document.getElementById('message');
+  const sendButton = document.getElementById('send');
+
+  function addMessage(kind, text, sources = []) {
+    const wrapper = document.createElement('div');
+    wrapper.className = `message ${kind}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    wrapper.appendChild(bubble);
+
+    if (sources.length) {
+      const box = document.createElement('div');
+      box.className = 'sources';
+      const title = document.createElement('strong');
+      title.textContent = 'Retrieved sources';
+      box.appendChild(title);
+      sources.forEach(source => {
+        const line = document.createElement('div');
+        line.textContent = `${source.source} · page ${source.page} · similarity ${source.score}%`;
+        box.appendChild(line);
+      });
+      wrapper.appendChild(box);
+    }
+
+    chat.appendChild(wrapper);
+    chat.scrollTop = chat.scrollHeight;
+    return wrapper;
+  }
+
+  async function sendMessage() {
+    const question = input.value.trim();
+    if (!question) return;
+
+    addMessage('user', question);
+    input.value = '';
+    input.disabled = true;
+    sendButton.disabled = true;
+    const loading = addMessage('bot', 'Searching the uploaded documents…');
+
+    try {
+      const response = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: question })
+      });
+      const data = await response.json();
+      loading.remove();
+      addMessage('bot', data.answer || 'No answer returned.', data.sources || []);
+    } catch (_error) {
+      loading.remove();
+      addMessage('bot', 'The request could not be completed. Please try again.');
+    } finally {
+      input.disabled = false;
+      sendButton.disabled = false;
+      input.focus();
+    }
+  }
+
+  sendButton.addEventListener('click', sendMessage);
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') sendMessage();
+  });
+</script>
+</body>
+</html>
